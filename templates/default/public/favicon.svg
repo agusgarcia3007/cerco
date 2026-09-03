@@ -1,1 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#10b981"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#f7f3ec"/>
+  <text x="32" y="46" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="42" text-anchor="middle" fill="#a8401f">c</text>
+</svg>

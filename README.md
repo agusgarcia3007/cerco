@@ -19,16 +19,16 @@ cerco build        # single-file release binary: dist/my-app
 ## what a route looks like
 
 ```c
-/* src/routes/index.c */
+/* src/routes/blog/[slug].c — one file, one route */
 #include <cerco.h>
-#include "../server/counter_view.h"
+#include "../server/posts.h"
 
 CERCO_ROUTE {
-  cerco_tag(r, "h1", CERCO_CLASS("text-3xl font-bold mb-4")) {
-    cerco_raw(r, "It works.");
+  const post *p = post_find(cerco_param(r, "slug"));
+  if (!p) { cerco_status(r, 404); /* ... render not-found ... */ return; }
+  cerco_tag(r, "h1", CERCO_CLASS("font-display text-4xl tracking-tight")) {
+    cerco_text(r, p->title);
   }
-  cerco_textf(r, "Hello from %s, served by native C.", "SSR");
-  counter_demo(r);   /* an interactive component */
 }
 ```
 
@@ -50,12 +50,20 @@ Requirements: **clang (LLVM 14+)**, **lld / wasm-ld**, **llvm-ar**.
 The release runtime needs none of them — only the built binary.
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/agusgarcia3007/cerco/main/scripts/install.sh | sh
+```
+
+The script clones the repo to `~/.cerco/src`, builds the CLI and installs it
+to `~/.local/bin/cerco`, installing the toolchain first if needed
+(Homebrew on macOS, apt/dnf/pacman on Linux). Prefer doing it by hand:
+
+```bash
 # macOS
 brew install llvm lld
 # Debian/Ubuntu
 apt install clang lld llvm
 
-git clone <repo> cerco && cd cerco
+git clone https://github.com/agusgarcia3007/cerco.git cerco && cd cerco
 make            # builds the cerco CLI (build/cerco)
 make install    # optional: ~/.local/bin/cerco
 cerco doctor    # verify the toolchain
