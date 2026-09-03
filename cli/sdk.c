@@ -13,7 +13,8 @@
  * Marker file name = hash of bundle contents, so CLI/header updates
  * invalidate the cache automatically.
  * Returns 0 on success. out_dir receives the sdk path. */
-int sdk_ensure(cerco_project *proj, char *out_dir, size_t out_cap) {
+int sdk_ensure(cerco_project *proj, char *out_dir, size_t out_cap,
+               char *out_hash, size_t hash_cap) {
   char sdk[1200], marker[1400];
   snprintf(sdk, sizeof(sdk), "%s/.cerco/sdk", proj->root);
 
@@ -37,6 +38,9 @@ int sdk_ensure(cerco_project *proj, char *out_dir, size_t out_cap) {
     hex[i * 2 + 1] = hd[digest[i] & 0xf];
   }
   hex[32] = 0;
+  if (out_hash && hash_cap > 0) {
+    snprintf(out_hash, hash_cap, "%s", hex);
+  }
 
   char oldmarker[1400];
   snprintf(oldmarker, sizeof(oldmarker), "%s/.cerco/sdk_marker", proj->root);

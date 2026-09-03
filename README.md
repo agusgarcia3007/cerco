@@ -73,6 +73,11 @@ Tailwind is **not** a prerequisite: the CLI downloads the pinned standalone
 binary (SHA-256 verified) into `~/.cerco/tools/` on first use. Set
 `CERCO_SKIP_TAILWIND=1` to skip it entirely.
 
+Builds are cached: the vendored runtime (libuv, llhttp, framework server)
+compiles once into `~/.cerco/cache/` and is shared by every project; app
+sources compile in parallel and unchanged code is skipped, so `cerco dev`
+starts in a fraction of a second.
+
 ## project layout
 
 ```

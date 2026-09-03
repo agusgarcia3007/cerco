@@ -1,6 +1,6 @@
 # cerco bootstrap build (builds the cerco CLI; app builds use the CLI itself)
 CC ?= clang
-CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Wno-unused-parameter -I include -I runtime/shared -I runtime/server
+CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Wno-unused-parameter -pthread -I include -I runtime/shared -I runtime/server
 UVINC = -I vendor/libuv/include -I vendor/llhttp/include
 LLVM_DIR ?= $(shell brew --prefix llvm 2>/dev/null || echo /usr/local/opt/llvm)
 LLD_DIR ?= $(shell brew --prefix lld 2>/dev/null || echo /usr/local/opt/lld)

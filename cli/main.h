@@ -26,7 +26,8 @@ int cmd_doctor(void);
 
 /* shared internals */
 typedef struct cerco_sdk cerco_sdk;
-int sdk_ensure(cerco_project *proj, char *out_dir, size_t out_cap);
+int sdk_ensure(cerco_project *proj, char *out_dir, size_t out_cap,
+               char *out_hash, size_t hash_cap);
 
 int tailwind_ensure(cerco_project *proj, char *out, size_t cap);
 int tailwind_run(cerco_project *proj, const char *tw_bin, const char *cwd,

@@ -9,11 +9,34 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 /* cerco dev: build (debug), run the server as a child process, watch files,
  * rebuild incrementally, restart the server and ping browsers via SSE. */
 
 static pid_t g_child = 0;
+
+/* try to bind the port ourselves: if that fails, the upcoming server
+ * would fail too (OrbStack, another dev server, a stale process...) */
+static int port_in_use(int port) {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return 0;
+  /* SO_REUSEADDR mirrors what the server itself does (libuv sets it), so
+   * lingering TIME_WAIT sockets don't read as "in use"; an active listener
+   * still fails the bind */
+  int on = 1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(0x7f000001UL); /* 127.0.0.1 */
+  addr.sin_port = htons((uint16_t)port);
+  int in_use = bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0;
+  close(fd);
+  return in_use;
+}
 
 static long long dev_now_ms(void) {
   struct timespec ts;
@@ -115,6 +138,18 @@ static int watch_scan(cerco_project *proj) {
   return changed;
 }
 
+/* 1 (and reaps) when the child server process has exited */
+static int child_dead(void) {
+  if (g_child <= 0) return 0;
+  int status;
+  pid_t r = waitpid(g_child, &status, WNOHANG);
+  if (r == g_child || (r < 0 && errno == ECHILD)) {
+    g_child = 0;
+    return 1;
+  }
+  return 0;
+}
+
 static void touch_reload(cerco_project *proj) {
   char f[1300];
   snprintf(f, sizeof(f), "%s/.cerco/reload_signal", proj->root);
@@ -126,9 +161,20 @@ static void touch_reload(cerco_project *proj) {
 }
 
 int cmd_dev(cerco_project *proj, int argc, char **argv) {
+  setvbuf(stdout, NULL, _IOLBF, 0); /* watch/rebuild logs visible when piped */
   int port = 3000;
   for (int i = 0; i < argc; i++) {
     if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
+  }
+
+  if (port_in_use(port)) {
+    fprintf(stderr,
+            "cerco dev: port %d is already in use on this machine.\n"
+            "  something else answered there (OrbStack? another server?) —\n"
+            "  see: lsof -nP -iTCP:%d -sTCP:LISTEN\n"
+            "  or pick another port: cerco dev --port %d\n",
+            port, port, port + 1);
+    return 1;
   }
 
   char gen[1300];
@@ -174,6 +220,12 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
 
   if (rc == 0) {
     spawn_server(proj, port);
+    usleep(300 * 1000);
+    if (child_dead()) {
+      fprintf(stderr, "cerco dev: server exited during startup (see error above)\n");
+      if (tw_child) kill(tw_child, SIGTERM);
+      return 1;
+    }
     printf("\nCerco dev\n  http://localhost:%d\n\n", port);
   }
 
@@ -181,6 +233,11 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
   watch_scan(proj); /* baseline */
   for (;;) {
     usleep(400 * 1000);
+    if (child_dead()) {
+      fprintf(stderr, "cerco dev: server exited unexpectedly\n");
+      if (tw_child) kill(tw_child, SIGTERM);
+      return 1;
+    }
     if (!watch_scan(proj)) continue;
     printf("\nchange detected — rebuilding...\n");
     int64_t old_bin_mtime = 0, new_bin_mtime = 0;
@@ -201,6 +258,12 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
       printf("server rebuilt — restarting\n");
       stop_server();
       spawn_server(proj, port);
+      usleep(200 * 1000);
+      if (child_dead()) {
+        fprintf(stderr, "cerco dev: server exited during restart (see error above)\n");
+        if (tw_child) kill(tw_child, SIGTERM);
+        return 1;
+      }
     }
     touch_reload(proj);
     printf("ready: http://localhost:%d\n", port);
