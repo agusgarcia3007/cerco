@@ -1,0 +1,2 @@
+CERCO_SF(1, itest_add, CERCO_I32, CERCO_I32, CERCO_I32)
+CERCO_SF(2, itest_fail, CERCO_I32)

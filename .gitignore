@@ -1,0 +1,9 @@
+build/
+.cerco/
+dist/
+*.o
+*.a
+!vendor/**
+.playwright-cli/
+nohup.out
+.DS_Store

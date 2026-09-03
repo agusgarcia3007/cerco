@@ -1,0 +1,2 @@
+CERCO_SF(1, todo_add, CERCO_I32, CERCO_STR)
+CERCO_SF(2, todo_toggle, CERCO_I32, CERCO_I32)
