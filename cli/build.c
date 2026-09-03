@@ -168,7 +168,8 @@ static void scan_cb(const char *rel, const char *full, int is_dir, void *user) {
       }
     }
   }
-  if (!strcmp(basebuf, "404.c")) {
+  if (!strcmp(basebuf, "404")) {
+    /* custom not-found page: registered under the framework-internal path */
     snprintf(r->path, sizeof(r->path), "/__cerco/404");
   } else if (seg[0] == 0) {
     snprintf(r->path, sizeof(r->path), "%s%s", r->dir[0] ? "/" : "",
@@ -184,13 +185,23 @@ static void scan_cb(const char *rel, const char *full, int is_dir, void *user) {
   snprintf(ms, sizeof(ms), "%s%s%s", r->dir, r->dir[0] ? "_" : "", fb);
   char mg[512];
   mangle(ms, mg, sizeof(mg));
-  snprintf(r->symbol, sizeof(r->symbol), "cerco_route_%s", mg);
-  /* dedupe symbols */
-  for (int i = 0; i < b->n_routes - 1; i++) {
-    if (!strcmp(b->routes[i].symbol, r->symbol)) {
-      snprintf(r->symbol, sizeof(r->symbol), "%s_%d", r->symbol, b->n_routes);
-      break;
+  /* dedupe symbols: a dir may hold index.c + index.post.c + ... which all
+   * mangle to the same name; suffix _1, _2, ... until unique */
+  char symbase[160];
+  snprintf(symbase, sizeof(symbase), "cerco_route_%s", mg);
+  for (int suffix = 0;; suffix++) {
+    if (suffix)
+      snprintf(r->symbol, sizeof(r->symbol), "%s_%d", symbase, suffix);
+    else
+      snprintf(r->symbol, sizeof(r->symbol), "%s", symbase);
+    int dup = 0;
+    for (int i = 0; i < b->n_routes; i++) {
+      if (!strcmp(b->routes[i].symbol, r->symbol)) {
+        dup = 1;
+        break;
+      }
     }
+    if (!dup) break;
   }
   b->n_routes++;
 }
@@ -208,16 +219,20 @@ static int find_layout(build_ctx *b, const char *dir, char *out, size_t cap) {
 static void compute_layout_chains(build_ctx *b) {
   for (int i = 0; i < b->n_routes; i++) {
     route_info *r = &b->routes[i];
-    /* walk ancestors from root to route dir (root dir "" included) */
+    /* walk ancestors from the route dir up to and including the root ("") */
     char dirs[MAX_LAYOUTS][256];
     int nd = 0;
     char work[256];
     snprintf(work, sizeof(work), "%s", r->dir);
     for (;;) {
-      snprintf(dirs[nd < MAX_LAYOUTS ? nd : MAX_LAYOUTS - 1], 256, "%s", work);
-      nd++;
+      if (nd >= MAX_LAYOUTS) break;
+      snprintf(dirs[nd++], 256, "%s", work);
       char *slash = strrchr(work, '/');
-      if (!slash) break;
+      if (!slash) {
+        /* no more slashes: after the dir itself, include the root */
+        if (work[0] && nd < MAX_LAYOUTS) snprintf(dirs[nd++], 256, "");
+        break;
+      }
       *slash = 0;
     }
     for (int k = nd - 1; k >= 0 && r->n_layouts < MAX_LAYOUTS; k--) {
