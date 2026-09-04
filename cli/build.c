@@ -57,6 +57,7 @@ typedef struct {
   int release;
   int dev_mode;
   int dev_assets;   /* no embedding: dev server serves dist/ from disk */
+  int skip_css;     /* dev: the tailwind --watch child owns dist/assets/styles.css */
 
   route_info routes[MAX_ROUTES];
   int n_routes;
@@ -1353,6 +1354,7 @@ int cmd_build(cerco_project *proj, int argc, char **argv) {
     if (!strcmp(argv[i], "--debug")) debug = 1;
     else if (!strcmp(argv[i], "--release")) debug = 0;
     else if (!strcmp(argv[i], "--dev-assets")) b.dev_assets = 1;
+    else if (!strcmp(argv[i], "--no-css")) b.skip_css = 1;
   }
   b.release = !debug;
   b.dev_mode = 0;
@@ -1442,7 +1444,8 @@ int cmd_build(cerco_project *proj, int argc, char **argv) {
   char twbin[1200];
   char css_in[1400];
   snprintf(css_in, sizeof(css_in), "%s/src/styles.css", proj->root);
-  if (file_exists(css_in) && tailwind_ensure(proj, twbin, sizeof(twbin)) == 0) {
+  if (!b.skip_css && file_exists(css_in) &&
+      tailwind_ensure(proj, twbin, sizeof(twbin)) == 0) {
     char css_out[1400];
     snprintf(css_out, sizeof(css_out), "%s/assets/styles.css", b.distdir);
     mkdir_for_file(css_out);

@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -223,6 +224,39 @@ static int wait_server_up(int port, int timeout_ms) {
   return -1;
 }
 
+/* Start tailwind's --watch child. Returns its pid, or 0 when tailwind is
+ * unavailable (CERCO_SKIP_TAILWIND, download failure, no styles.css). */
+static pid_t spawn_tailwind_watch(cerco_project *proj) {
+  char twbin[1200], css_in[1400];
+  snprintf(css_in, sizeof(css_in), "%s/src/styles.css", proj->root);
+  if (!file_exists(css_in)) return 0;
+  if (tailwind_ensure(proj, twbin, sizeof(twbin)) != 0) return 0;
+
+  char css_out[1400];
+  snprintf(css_out, sizeof(css_out), "%s/dist/assets/styles.css", proj->root);
+  mkdir_for_file(css_out);
+  pid_t pid = fork();
+  if (pid == 0) {
+    chdir(proj->root);
+    execl(twbin, twbin, "-i", "src/styles.css", "-o", "dist/assets/styles.css",
+          "--watch", (char *)NULL);
+    _exit(127);
+  }
+  return pid > 0 ? pid : 0;
+}
+
+/* the watcher writes the stylesheet asynchronously; do not announce a URL
+ * whose first paint would arrive unstyled */
+static void wait_for_css(cerco_project *proj, int timeout_ms) {
+  char css_out[1400];
+  snprintf(css_out, sizeof(css_out), "%s/dist/assets/styles.css", proj->root);
+  for (int waited = 0; waited < timeout_ms; waited += 20) {
+    struct stat st;
+    if (stat(css_out, &st) == 0 && st.st_size > 0) return;
+    usleep(20 * 1000);
+  }
+}
+
 int cmd_dev(cerco_project *proj, int argc, char **argv) {
   setvbuf(stdout, NULL, _IOLBF, 0); /* watch/rebuild logs visible when piped */
   int port = 3000;
@@ -271,38 +305,22 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
   snprintf(reload_file, sizeof(reload_file), "%s/.cerco/reload_signal", proj->root);
   if (!file_exists(reload_file)) write_file(reload_file, "0\n", 2);
 
-  /* initial build */
+  /* Start tailwind before the C build, not after it: its startup costs about
+   * a second, and running it alongside the compile keeps that off the clock.
+   * It also becomes the only writer of dist/assets/styles.css — the build
+   * used to produce the same file the watcher immediately rebuilt. */
+  pid_t tw_child = spawn_tailwind_watch(proj);
+
   cerco_project p2 = *proj;
   int rc;
-  {
-    char arg0[] = "--debug";
-    char arg1[] = "--dev-assets";
-    char *bargv[3] = { arg0, arg1, NULL };
-    rc = cmd_build(&p2, 2, bargv);
-  }
+  char arg0[] = "--debug";
+  char arg1[] = "--dev-assets";
+  char arg2[] = "--no-css";
+  char *bargv[4] = { arg0, arg1, tw_child ? arg2 : NULL, NULL };
+  int bargc = tw_child ? 3 : 2;
+  rc = cmd_build(&p2, bargc, bargv);
   if (rc != 0) {
     fprintf(stderr, "\ncerco dev: initial build failed; waiting for changes...\n");
-  }
-
-  /* tailwind watch child */
-  pid_t tw_child = 0;
-  {
-    char twbin[1200];
-    char css_in[1400];
-    snprintf(css_in, sizeof(css_in), "%s/src/styles.css", proj->root);
-    if (file_exists(css_in) && tailwind_ensure(proj, twbin, sizeof(twbin)) == 0) {
-      char css_out[1400];
-      snprintf(css_out, sizeof(css_out), "%s/dist/assets/styles.css", proj->root);
-      mkdir_for_file(css_out);
-      pid_t pid = fork();
-      if (pid == 0) {
-        chdir(proj->root);
-        execl(twbin, twbin, "-i", "src/styles.css", "-o",
-              "dist/assets/styles.css", "--watch", (char *)NULL);
-        _exit(127);
-      }
-      tw_child = pid;
-    }
   }
 
   if (rc == 0) {
@@ -312,6 +330,7 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
       if (tw_child) kill(tw_child, SIGTERM);
       return 1;
     }
+    if (tw_child) wait_for_css(proj, 5000);
     printf("\nCerco dev\n  http://localhost:%d\n\n", port);
   }
 
@@ -331,10 +350,7 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
     snprintf(bin, sizeof(bin), "%s/dist/%s", proj->root, proj->name);
     mtime_ms(bin, &old_bin_mtime);
 
-    char arg0[] = "--debug";
-    char arg1[] = "--dev-assets";
-    char *bargv[3] = { arg0, arg1, NULL };
-    int brc = cmd_build(&p2, 2, bargv);
+    int brc = cmd_build(&p2, bargc, bargv);
     if (brc != 0) {
       fprintf(stderr, "build failed — keeping previous server running\n");
       continue;
