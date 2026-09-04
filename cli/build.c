@@ -1106,7 +1106,7 @@ static int gen_assets(build_ctx *b) {
   fprintf(f, "#include \"cerco.h\"\n\n");
   fprintf(f, "#include <stddef.h>\n\n");
   if (!b->dev_assets) {
-    asset_ctx a = { b, f, 0, 0 };
+    asset_ctx a = { b, f, 0, 0, { { 0 } } }; /* meta[] filled in by the walk */
     walk_dir(b->distdir, "", gen_assets_cb, &a);
     fprintf(f, "\nconst cerco_asset_entry cerco_assets_table[] = {\n");
     for (int i = 0; i < a.n; i++) {
