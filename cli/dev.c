@@ -19,6 +19,15 @@
 
 static pid_t g_child = 0;
 
+/* usleep was removed in POSIX.1-2008, which this file requests, so glibc does
+ * not declare it; nanosleep is the supported spelling everywhere. */
+static void sleep_ms(long ms) {
+  struct timespec ts;
+  ts.tv_sec = ms / 1000;
+  ts.tv_nsec = (ms % 1000) * 1000000L;
+  nanosleep(&ts, NULL);
+}
+
 /* Can we open a TCP connection to this port on the loopback of one family?
  * A live listener accepts; a socket lingering in TIME_WAIT does not, so this
  * never mistakes a just-restarted server for a busy port. */
@@ -127,7 +136,7 @@ static void stop_server(void) {
     int status;
     pid_t r = waitpid(g_child, &status, WNOHANG);
     if (r == g_child || (r < 0 && errno == ECHILD)) { g_child = 0; return; }
-    usleep(100 * 1000);
+    sleep_ms(100);
   }
   kill(g_child, SIGKILL);
   waitpid(g_child, NULL, 0);
@@ -219,7 +228,7 @@ static int wait_server_up(int port, int timeout_ms) {
   for (int waited = 0; waited < timeout_ms; waited += 20) {
     if (child_dead()) return -1;
     if (can_connect(AF_INET, port)) return 0;
-    usleep(20 * 1000);
+    sleep_ms(20);
   }
   return -1;
 }
@@ -253,7 +262,7 @@ static void wait_for_css(cerco_project *proj, int timeout_ms) {
   for (int waited = 0; waited < timeout_ms; waited += 20) {
     struct stat st;
     if (stat(css_out, &st) == 0 && st.st_size > 0) return;
-    usleep(20 * 1000);
+    sleep_ms(20);
   }
 }
 
@@ -337,7 +346,7 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
   /* watch loop */
   watch_scan(proj); /* baseline */
   for (;;) {
-    usleep(400 * 1000);
+    sleep_ms(400);
     if (child_dead()) {
       fprintf(stderr, "cerco dev: server exited unexpectedly\n");
       if (tw_child) kill(tw_child, SIGTERM);

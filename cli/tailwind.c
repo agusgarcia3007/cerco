@@ -63,13 +63,15 @@ int tailwind_ensure(cerco_project *proj, char *out, size_t cap) {
   if (!file_exists(bin)) {
     printf("downloading tailwind %s (%s/%s)...\n", ent->version, ent->platform,
            ent->arch);
+    fflush(stdout); /* say it before curl runs, not after (pipes buffer) */
     if (mkdir_for_file(bin) != 0) return -1;
     char tmp[1400];
     snprintf(tmp, sizeof(tmp), "%s.download", bin);
     /* curl -L -o */
     char *argv[8];
     argv[0] = "curl";
-    argv[1] = "-fSL";
+    argv[1] = "-fsSL"; /* silent: a progress meter floods CI and docker logs,
+                        * -S still surfaces the error if it fails */
     argv[2] = "-o";
     argv[3] = tmp;
     argv[4] = (char *)url;
