@@ -39,7 +39,14 @@ static const tailwind_entry *manifest_entry(void) {
 }
 
 int tailwind_ensure(cerco_project *proj, char *out, size_t cap) {
-  if (getenv("CERCO_SKIP_TAILWIND")) return -1;
+  /* respect the value, not just the presence: CERCO_SKIP_TAILWIND=0 asking
+   * for tailwind and getting none is a trap worth not setting */
+  {
+    const char *skip = getenv("CERCO_SKIP_TAILWIND");
+    if (skip && skip[0] && strcmp(skip, "0") != 0 &&
+        strcmp(skip, "false") != 0 && strcmp(skip, "no") != 0)
+      return -1;
+  }
 
   const tailwind_entry *ent = manifest_entry();
   if (!ent) {
