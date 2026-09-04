@@ -156,6 +156,15 @@ int32_t cerco_value(int32_t node, char *buf, int32_t cap) {
   return host_value(node, (int32_t)buf, cap);
 }
 
+int32_t cerco_attr(int32_t node, const char *name, char *buf, int32_t cap) {
+  if (!node || !name || !buf || cap <= 0) return -1;
+  cerco_dom_flush(); /* pending set_attr commands must land before we read */
+  int32_t n = host_attr(node, (int32_t)name, (int32_t)strlen(name),
+                        (int32_t)buf, cap - 1);
+  buf[n > 0 ? n : 0] = 0; /* always a valid C string, empty when absent */
+  return n;
+}
+
 /* ---------------------------------------------------------------- signals */
 
 typedef struct cerco_sub {

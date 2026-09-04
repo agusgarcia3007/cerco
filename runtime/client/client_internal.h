@@ -20,6 +20,9 @@ __attribute__((import_module("cerco"), import_name("query")))
 extern int32_t host_query(int32_t scope, int32_t sel_ptr, int32_t sel_len);
 __attribute__((import_module("cerco"), import_name("value")))
 extern int32_t host_value(int32_t node, int32_t out_ptr, int32_t cap);
+__attribute__((import_module("cerco"), import_name("attr")))
+extern int32_t host_attr(int32_t node, int32_t key_ptr, int32_t key_len,
+                         int32_t out_ptr, int32_t cap);
 __attribute__((import_module("cerco"), import_name("fetch")))
 extern void host_fetch(int32_t id, int32_t method_ptr, int32_t method_len,
                        int32_t url_ptr, int32_t url_len, int32_t body_ptr,

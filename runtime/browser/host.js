@@ -129,6 +129,16 @@
         new Uint8Array(memory.buffer, outPtr, v.length).set(v);
         return v.length;
       },
+      attr: function (node, kPtr, kLen, outPtr, cap) {
+        var el = reg(node);
+        if (!el) return -1;
+        var v = el.getAttribute(getStr(kPtr, kLen));
+        if (v === null) return -1;
+        var b = encoder.encode(v);
+        if (b.length > cap) return -1;
+        new Uint8Array(memory.buffer, outPtr, b.length).set(b);
+        return b.length;
+      },
       fetch: function (id, mPtr, mLen, uPtr, uLen, bPtr, bLen) {
         var method = getStr(mPtr, mLen);
         var url = getStr(uPtr, uLen);

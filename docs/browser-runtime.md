@@ -10,6 +10,7 @@ The host (`runtime/browser/host.js`) is the only JavaScript in the framework:
 | dom_flush(ptr, len) | process one DOM command batch |
 | query(scope, sel, len) | querySelector; returns a node id |
 | value(node, out, cap) | read input value into wasm |
+| attr(node, key, out, cap) | read an attribute into wasm |
 | fetch(id, method, url, body) | async fetch; the client hands back a buffer |
 | nav_push(url) | history.pushState |
 | set_title(ptr, len) | document.title |

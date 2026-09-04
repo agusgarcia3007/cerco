@@ -1223,20 +1223,46 @@ static void copy_public_cb(const char *rel, const char *full, int is_dir, void *
   free(data);
 }
 
-static void audit_client_sources(build_ctx *b, char *out_err, size_t err_cap) {
-  /* fail the build if server-only code would end up in the wasm target */
+/* Does this file have a real `#include ... cerco_client.h` directive?
+ *
+ * A plain substring search is not good enough: a route that documents the
+ * client API, or renders a code sample, mentions the header inside a string
+ * literal and is perfectly legal. Only a line whose first token is #include
+ * counts, which is what the preprocessor would actually act on. */
+static int includes_client_header(const char *data) {
+  for (const char *line = data; line && *line;) {
+    const char *end = strchr(line, '\n');
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (strncmp(p, "#include", 8) == 0) {
+      const char *stop = end ? end : p + strlen(p);
+      size_t rest = (size_t)(stop - (p + 8));
+      const char *q = p + 8;
+      for (size_t k = 0; k + 14 <= rest; k++) {
+        if (strncmp(q + k, "cerco_client.h", 14) == 0) return 1;
+      }
+    }
+    line = end ? end + 1 : NULL;
+  }
+  return 0;
+}
+
+/* fail the build if server-only code would end up in the wasm target */
+static void audit_client_sources(build_ctx *b) {
   for (int i = 0; i < b->n_routes; i++) {
     char full[1400];
     snprintf(full, sizeof(full), "%s/%s", b->proj->root, b->routes[i].rel);
     size_t len = 0;
     char *data = read_file(full, &len);
     if (!data) continue;
-    if (strstr(data, "cerco_client.h")) {
-      snprintf(out_err, err_cap,
-               "%s: route files are server-only and must not include cerco_client.h\n",
-               b->routes[i].rel);
+    if (includes_client_header(data)) {
       free(data);
-      exit(1);
+      /* say what went wrong: this used to exit silently */
+      die("%s includes <cerco_client.h>, but route files are server-only "
+          "and never enter the wasm binary.\n"
+          "       Move the client code to src/components/ and mark its root "
+          "with CERCO_COMPONENT().",
+          b->routes[i].rel);
     }
     free(data);
   }
@@ -1281,7 +1307,7 @@ static const char *wasm_out_path(build_ctx *b) {
   return p;
 }
 
-/* feed src/** contents into the tailwind cache key (classes can appear in
+/* feed src/ contents into the tailwind cache key (classes can appear in
  * any scanned source file) */
 static void css_hash_cb(const char *rel, const char *full, int is_dir,
                         void *user) {
@@ -1332,7 +1358,7 @@ int cmd_build(cerco_project *proj, int argc, char **argv) {
   b.n_components = 0;
   walk_dir(proj->root, "", scan_components_cb, &b);
 
-  audit_client_sources(&b, (char[1]){0}, 1);
+  audit_client_sources(&b);
 
   if (g_verbose)
     printf("routes %d, layouts %d, server fns %d, components %d\n", b.n_routes,

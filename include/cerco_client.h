@@ -70,6 +70,10 @@ void cerco_remove(int32_t node);
 void cerco_set_value(int32_t node, const char *v);
 /* read an input's value; returns length or -1 */
 int32_t cerco_value(int32_t node, char *buf, int32_t cap);
+/* read an attribute the server rendered (the usual way to pass per-element
+ * data to a component). Returns the length, or -1 when the attribute is
+ * absent or does not fit. buf is NUL-terminated either way. */
+int32_t cerco_attr(int32_t node, const char *name, char *buf, int32_t cap);
 /* html set by trusted server response only (client navigation) */
 void cerco_set_inner_html(int32_t node, const char *html);
 
