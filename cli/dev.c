@@ -18,24 +18,75 @@
 
 static pid_t g_child = 0;
 
-/* try to bind the port ourselves: if that fails, the upcoming server
- * would fail too (OrbStack, another dev server, a stale process...) */
-static int port_in_use(int port) {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
+/* Can we open a TCP connection to this port on the loopback of one family?
+ * A live listener accepts; a socket lingering in TIME_WAIT does not, so this
+ * never mistakes a just-restarted server for a busy port. */
+static int can_connect(int family, int port) {
+  int fd = socket(family, SOCK_STREAM, 0);
+  if (fd < 0) return 0; /* family unavailable: nothing can be listening on it */
+  int ok;
+  if (family == AF_INET6) {
+    struct sockaddr_in6 a6;
+    memset(&a6, 0, sizeof(a6));
+    a6.sin6_family = AF_INET6;
+    a6.sin6_addr = in6addr_loopback;
+    a6.sin6_port = htons((uint16_t)port);
+    ok = connect(fd, (struct sockaddr *)&a6, sizeof(a6)) == 0;
+  } else {
+    struct sockaddr_in a4;
+    memset(&a4, 0, sizeof(a4));
+    a4.sin_family = AF_INET;
+    a4.sin_addr.s_addr = htonl(0x7f000001UL); /* 127.0.0.1 */
+    a4.sin_port = htons((uint16_t)port);
+    ok = connect(fd, (struct sockaddr *)&a4, sizeof(a4)) == 0;
+  }
+  close(fd);
+  return ok;
+}
+
+/* Would the server fail to take the wildcard address of one family?
+ * Catches a listener bound to a non-loopback interface, which no loopback
+ * connect would find. SO_REUSEADDR mirrors what libuv does, so TIME_WAIT
+ * sockets do not read as "in use". */
+static int wildcard_taken(int family, int port) {
+  int fd = socket(family, SOCK_STREAM, 0);
   if (fd < 0) return 0;
-  /* SO_REUSEADDR mirrors what the server itself does (libuv sets it), so
-   * lingering TIME_WAIT sockets don't read as "in use"; an active listener
-   * still fails the bind */
   int on = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(0x7f000001UL); /* 127.0.0.1 */
-  addr.sin_port = htons((uint16_t)port);
-  int in_use = bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0;
+  int busy;
+  if (family == AF_INET6) {
+    /* test v6 on its own, or the kernel maps it onto the v4 test */
+    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on));
+    struct sockaddr_in6 a6;
+    memset(&a6, 0, sizeof(a6));
+    a6.sin6_family = AF_INET6;
+    a6.sin6_addr = in6addr_any;
+    a6.sin6_port = htons((uint16_t)port);
+    busy = bind(fd, (struct sockaddr *)&a6, sizeof(a6)) != 0;
+  } else {
+    struct sockaddr_in a4;
+    memset(&a4, 0, sizeof(a4));
+    a4.sin_family = AF_INET;
+    a4.sin_addr.s_addr = htonl(INADDR_ANY);
+    a4.sin_port = htons((uint16_t)port);
+    busy = bind(fd, (struct sockaddr *)&a4, sizeof(a4)) != 0;
+  }
   close(fd);
-  return in_use;
+  return busy;
+}
+
+/* Is this port already answering, in either family?
+ *
+ * Both matter, not just the one cerco binds. A server holding only
+ * [::1]:3000 leaves 0.0.0.0:3000 bindable, so cerco used to start
+ * "successfully" on the same port and then print a localhost URL that
+ * resolved to ::1 and reached the other server instead.
+ *
+ * A bind test alone is not enough either: with SO_REUSEADDR the wildcard
+ * binds happily alongside a listener on 127.0.0.1, so ask by connecting. */
+static int port_in_use(int port) {
+  return can_connect(AF_INET, port) || can_connect(AF_INET6, port) ||
+         wildcard_taken(AF_INET, port) || wildcard_taken(AF_INET6, port);
 }
 
 static long long dev_now_ms(void) {
@@ -166,17 +217,7 @@ static void touch_reload(cerco_project *proj) {
 static int wait_server_up(int port, int timeout_ms) {
   for (int waited = 0; waited < timeout_ms; waited += 20) {
     if (child_dead()) return -1;
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd >= 0) {
-      struct sockaddr_in addr;
-      memset(&addr, 0, sizeof(addr));
-      addr.sin_family = AF_INET;
-      addr.sin_addr.s_addr = htonl(0x7f000001UL);
-      addr.sin_port = htons((uint16_t)port);
-      int up = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
-      close(fd);
-      if (up) return 0;
-    }
+    if (can_connect(AF_INET, port)) return 0;
     usleep(20 * 1000);
   }
   return -1;
@@ -185,18 +226,42 @@ static int wait_server_up(int port, int timeout_ms) {
 int cmd_dev(cerco_project *proj, int argc, char **argv) {
   setvbuf(stdout, NULL, _IOLBF, 0); /* watch/rebuild logs visible when piped */
   int port = 3000;
+  int port_chosen = 0; /* the user named a port: never move off it silently */
   for (int i = 0; i < argc; i++) {
-    if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
+    if (!strcmp(argv[i], "--port") && i + 1 < argc) {
+      port = atoi(argv[++i]);
+      port_chosen = 1;
+    }
   }
 
   if (port_in_use(port)) {
-    fprintf(stderr,
-            "cerco dev: port %d is already in use on this machine.\n"
-            "  something else answered there (OrbStack? another server?) —\n"
-            "  see: lsof -nP -iTCP:%d -sTCP:LISTEN\n"
-            "  or pick another port: cerco dev --port %d\n",
-            port, port, port + 1);
-    return 1;
+    if (port_chosen) {
+      fprintf(stderr,
+              "cerco dev: port %d is already in use on this machine.\n"
+              "  something else is listening there (another dev server?) —\n"
+              "  see: lsof -nP -iTCP:%d -sTCP:LISTEN\n",
+              port, port);
+      return 1;
+    }
+    /* the default port is a convenience, not a request: step to the next
+     * free one rather than refusing to start */
+    int found = 0;
+    for (int p = port + 1; p < port + 32; p++) {
+      if (port_in_use(p)) continue;
+      printf("port %d is in use — starting on %d instead\n"
+             "  (what has %d: lsof -nP -iTCP:%d -sTCP:LISTEN)\n",
+             port, p, port, port);
+      port = p;
+      found = 1;
+      break;
+    }
+    if (!found) {
+      fprintf(stderr,
+              "cerco dev: ports %d-%d are all in use on this machine.\n"
+              "  pick one yourself: cerco dev --port <port>\n",
+              port, port + 31);
+      return 1;
+    }
   }
 
   char gen[1300];

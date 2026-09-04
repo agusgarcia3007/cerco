@@ -747,7 +747,7 @@ static int sdk_cache_path(build_ctx *b, int wasm, const char *obj_rel,
 
 static int compile_obj(build_ctx *b, const char *src_full, const char *obj_rel,
                        const char *extra_define, int wasm, int from_sdk,
-                       char *out_err, size_t err_cap) {
+                       char *out_err, size_t err_cap, int *ran_compiler) {
   char obj_full[1500];
   snprintf(obj_full, sizeof(obj_full), "%s/%s", b->objdir, obj_rel);
   char objdir_only[1500];
@@ -771,6 +771,7 @@ static int compile_obj(build_ctx *b, const char *src_full, const char *obj_rel,
       }
       char tmp[1700];
       snprintf(tmp, sizeof(tmp), "%s.tmp%d", cached, (int)getpid());
+      if (ran_compiler) *ran_compiler = 1;
       if (run_clang_compile(b, src_full, tmp, extra_define, wasm, out_err,
                             err_cap) == 0 &&
           rename(tmp, cached) == 0) {
@@ -782,6 +783,7 @@ static int compile_obj(build_ctx *b, const char *src_full, const char *obj_rel,
   }
 
   if (mkdir_for_file(obj_full) != 0) return -1;
+  if (ran_compiler) *ran_compiler = 1;
   return run_clang_compile(b, src_full, obj_full, extra_define, wasm, out_err,
                            err_cap);
 }
@@ -829,6 +831,8 @@ typedef struct {
   char err[16384];
   size_t err_len;
   int failed;
+  const char *what;  /* "client" / "server", for the progress line */
+  int announced;
 } compile_pool;
 
 static void *pool_worker(void *arg) {
@@ -840,8 +844,22 @@ static void *pool_worker(void *arg) {
     if (i >= p->q->n) break;
     compile_job *j = &p->q->jobs[i];
     char err[8192];
-    if (compile_obj(p->b, j->src, j->obj_rel, j->define[0] ? j->define : NULL,
-                    j->wasm, j->from_sdk, err, sizeof(err)) != 0) {
+    int ran = 0;
+    int rc = compile_obj(p->b, j->src, j->obj_rel,
+                         j->define[0] ? j->define : NULL, j->wasm, j->from_sdk,
+                         err, sizeof(err), &ran);
+    if (ran && !p->announced) {
+      /* Only once a compile actually starts: a warm build reaches here for
+       * every file and compiles none, and must stay silent. */
+      pthread_mutex_lock(&p->lock);
+      if (!p->announced) {
+        p->announced = 1;
+        printf("compiling %s...\n", p->what);
+        fflush(stdout);
+      }
+      pthread_mutex_unlock(&p->lock);
+    }
+    if (rc != 0) {
       pthread_mutex_lock(&p->lock);
       p->failed = 1;
       size_t room = sizeof(p->err) - p->err_len - 1;
@@ -872,7 +890,7 @@ static long cpu_count(void) {
 #endif
 }
 
-static int run_compile_pool(build_ctx *b, compile_queue *q) {
+static int run_compile_pool(build_ctx *b, compile_queue *q, const char *what) {
   if (q->n == 0) return 0;
   long ncpu = cpu_count();
   if (ncpu > 8) ncpu = 8;
@@ -882,6 +900,7 @@ static int run_compile_pool(build_ctx *b, compile_queue *q) {
   memset(&p, 0, sizeof(p));
   p.b = b;
   p.q = q;
+  p.what = what;
   pthread_mutex_init(&p.lock, NULL);
 
   if (ncpu == 1) {
@@ -1388,7 +1407,7 @@ int cmd_build(cerco_project *proj, int argc, char **argv) {
     snprintf(orl, sizeof(orl), "wa_gen_components.o");
     queue_push(&wq, f, orl, NULL, 1, 0);
   }
-  if (run_compile_pool(&b, &wq) != 0) return 1;
+  if (run_compile_pool(&b, &wq, "client") != 0) return 1;
   free(wq.jobs);
   collect_ctx cw = { &b, &wasm_objs, "wa_" };
   walk_dir(b.objdir, "", collect_obj_cb, &cw);
@@ -1515,7 +1534,7 @@ int cmd_build(cerco_project *proj, int argc, char **argv) {
     snprintf(orl, sizeof(orl), "sa_gen_assets.o");
     queue_push(&sq, f, orl, NULL, 0, 0);
   }
-  if (run_compile_pool(&b, &sq) != 0) return 1;
+  if (run_compile_pool(&b, &sq, "server") != 0) return 1;
   free(sq.jobs);
 
   collect_ctx cs = { &b, &srv_objs, "sa_" };
