@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include <errno.h>
 #include "main.h"
 #include "util.h"
 #include "bundle.h"
@@ -27,7 +28,16 @@ int project_load(cerco_project *proj, const char *explicit_root) {
   if (explicit_root) {
     snprintf(dir, sizeof(dir), "%s", explicit_root);
   } else {
-    if (!getcwd(dir, sizeof(dir))) die("cannot get cwd");
+    if (!getcwd(dir, sizeof(dir))) {
+      /* ENOENT here means the shell's working directory was deleted or
+       * replaced from elsewhere — the usual cause, and not something the
+       * user can guess from "cannot get cwd" */
+      if (errno == ENOENT)
+        die("the current directory no longer exists (it was deleted or "
+            "replaced).\n"
+            "       Re-enter it to pick up the new one: cd \"$PWD\"");
+      die("cannot read the current directory: %s", strerror(errno));
+    }
   }
   char probe[1200];
   for (int depth = 0; depth < 16; depth++) {
