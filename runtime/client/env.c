@@ -64,7 +64,7 @@ extern int32_t host_value(int32_t node, int32_t out_ptr, int32_t cap);
 __attribute__((import_module("cerco"), import_name("fetch")))
 extern void host_fetch(int32_t id, int32_t method_ptr, int32_t method_len,
                        int32_t url_ptr, int32_t url_len, int32_t body_ptr,
-                       int32_t body_len, int32_t resp_ptr, int32_t resp_cap);
+                       int32_t body_len);
 __attribute__((import_module("cerco"), import_name("nav_push")))
 extern void host_nav_push(int32_t url_ptr, int32_t url_len);
 __attribute__((import_module("cerco"), import_name("set_title")))
@@ -222,4 +222,48 @@ char *strstr(const char *haystack, const char *needle) {
     if (!*n) return (char *)haystack;
   }
   return 0;
+}
+
+int strncmp(const char *a, const char *b, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    unsigned char x = (unsigned char)a[i], y = (unsigned char)b[i];
+    if (x != y) return (int)x - (int)y;
+    if (!x) return 0;
+  }
+  return 0;
+}
+
+/* Minimal always-truncating formatter for client code: %s, %d/%i, %%.
+ * The wasm client has no libc printf and never will (it would drag in the
+ * whole float/locale machinery); these two verbs cover building URLs,
+ * labels and selectors, which is what components actually do.
+ * Returns the length written (never >= cap; buf is always NUL-terminated). */
+int32_t cerco_format(char *buf, int32_t cap, const char *fmt, ...) {
+  if (!buf || cap <= 0) return 0;
+  int32_t o = 0;
+  va_list ap;
+  va_start(ap, fmt);
+  for (const char *p = fmt; *p && o + 1 < cap; p++) {
+    if (*p != '%') { buf[o++] = *p; continue; }
+    p++;
+    if (*p == 's') {
+      const char *s = va_arg(ap, const char *);
+      if (!s) s = "(null)";
+      while (*s && o + 1 < cap) buf[o++] = *s++;
+    } else if (*p == 'd' || *p == 'i') {
+      char tmp[12];
+      int32_t n = cerco_i32_to_str(tmp, va_arg(ap, int32_t));
+      for (int32_t i = 0; i < n && o + 1 < cap; i++) buf[o++] = tmp[i];
+    } else if (*p == '%') {
+      buf[o++] = '%';
+    } else if (!*p) {
+      break; /* trailing '%' */
+    } else {
+      buf[o++] = '%'; /* unknown verb: emit it literally */
+      if (o + 1 < cap) buf[o++] = *p;
+    }
+  }
+  va_end(ap);
+  buf[o] = 0;
+  return o;
 }

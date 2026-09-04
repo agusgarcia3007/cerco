@@ -24,6 +24,28 @@ char *cerco_strdup(const char *s);
 void *cerco_scratch_alloc(size_t n);
 char *cerco_scratch_strdup(const char *s);
 
+/* ---------------------------------------------------------- string helpers */
+
+/* The client is freestanding wasm: there is no libc to link against. The
+ * runtime implements this subset and client components may use it freely. */
+size_t strlen(const char *s);
+int strcmp(const char *a, const char *b);
+int strncmp(const char *a, const char *b, size_t n);
+char *strstr(const char *haystack, const char *needle);
+char *strcpy(char *dst, const char *src);
+void *memcpy(void *dst, const void *src, size_t n);
+void *memmove(void *dst, const void *src, size_t n);
+void *memset(void *dst, int c, size_t n);
+int memcmp(const void *a, const void *b, size_t n);
+
+/* write v as decimal into buf; returns the length (buf needs 12 bytes) */
+int32_t cerco_i32_to_str(char *buf, int32_t v);
+
+/* truncating formatter, %s and %d/%i only (no printf in wasm). Always
+ * NUL-terminates; returns the length written. */
+int32_t cerco_format(char *buf, int32_t cap, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
 /* ----------------------------------------------------------------- signals */
 
 typedef struct cerco_sig cerco_sig;
@@ -65,6 +87,15 @@ void cerco_bind_class(int32_t node, cerco_sig *s, const char *cls);
 
 /* -------------------------------------------------------------------- http */
 
+/* Transport-level statuses, distinct from any HTTP code. */
+#define CERCO_HTTP_FAILED     0  /* network error, CORS rejection, aborted */
+#define CERCO_HTTP_TOO_LARGE (-1) /* body over the response cap; nothing read */
+
+/* The callback receives the whole body or nothing — a response that does not
+ * fit is reported as CERCO_HTTP_TOO_LARGE rather than silently truncated.
+ * data is NUL-terminated one byte past len, so a text body can be handed
+ * straight to strstr and friends. It is valid only for the duration of the
+ * callback: copy anything you keep. */
 typedef void (*cerco_http_cb)(int status, const uint8_t *data, int32_t len,
                               void *user);
 void cerco_http_post(const char *url, const uint8_t *body, int32_t len,

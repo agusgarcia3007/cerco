@@ -79,7 +79,18 @@
         break;
       }
       case 11: { var id = u32(), v = str(); var el = reg(id); if (el && 'value' in el) el.value = v; break; }
-      case 12: { var id = u32(), html = str(); var el = reg(id); if (el) { handlers.clear(); el.innerHTML = html; } break; }
+      case 12: { // SET_INNER_HTML: only handlers inside the replaced subtree die
+        var id = u32(), html = str();
+        var el = reg(id);
+        if (el) {
+          el.innerHTML = html;
+          handlers.forEach(function (h, nid) {
+            var n = registry[nid];
+            if (n && n !== el && el.contains(n)) handlers.delete(nid);
+          });
+        }
+        break;
+      }
       default: break; // unknown op: skip is impossible (lengths unknown) -> must keep ops in sync
     }
     return pos;
@@ -118,10 +129,10 @@
         new Uint8Array(memory.buffer, outPtr, v.length).set(v);
         return v.length;
       },
-      fetch: function (id, mPtr, mLen, uPtr, uLen, bPtr, bLen, rPtr, rCap) {
+      fetch: function (id, mPtr, mLen, uPtr, uLen, bPtr, bLen) {
         var method = getStr(mPtr, mLen);
         var url = getStr(uPtr, uLen);
-        var body = bLen > 0 ? new Uint8Array(memory.buffer, bPtr, bLen) : null;
+        var body = bLen > 0 ? new Uint8Array(memory.buffer, bPtr, bLen).slice() : null;
         fetch(url, {
           method: method,
           body: body,
@@ -129,9 +140,14 @@
         }).then(function (resp) {
           return resp.arrayBuffer().then(function (buf) {
             var bytes = new Uint8Array(buf);
-            var n = Math.min(bytes.length, rCap);
-            if (n > 0) new Uint8Array(memory.buffer, rPtr, n).set(bytes.subarray(0, n));
-            wasm.exports.cerco_fetch_done(id, resp.status, n);
+            // ask the client for a buffer sized to this body; 0 means the
+            // body is over its cap, reported as -1 (never truncated)
+            var ptr = wasm.exports.cerco_fetch_reserve(id, bytes.length);
+            if (!ptr) { wasm.exports.cerco_fetch_done(id, -1, 0); return; }
+            // read memory.buffer AFTER the reserve call: growing the wasm
+            // heap detaches any ArrayBuffer taken before it
+            new Uint8Array(memory.buffer, ptr, bytes.length).set(bytes);
+            wasm.exports.cerco_fetch_done(id, resp.status, bytes.length);
           });
         }).catch(function () {
           wasm.exports.cerco_fetch_done(id, 0, 0);
@@ -167,7 +183,34 @@
         for (var i = 0; i < roots.length; i++) hydrateRoot(i);
         return roots.length;
       },
-      nav_reload: function () { location.reload(); }
+      nav_reload: function () { location.reload(); },
+      swap_page: function (ptr, len) {
+        // replace only the nodes between the cerco:page markers; the layout
+        // (header/nav/footer) lives outside them and survives the swap.
+        // returns 1 on success, 0 when the markers are missing.
+        var html = getStr(ptr, len);
+        var start = null, end = null;
+        var walker = document.createTreeWalker(
+          document.body, NodeFilter.SHOW_COMMENT, null);
+        var node;
+        while ((node = walker.nextNode())) {
+          var v = node.nodeValue;
+          if (v === 'cerco:page') start = node;
+          else if (v === 'cerco:/page') { end = node; break; }
+        }
+        if (!start || !end) return 0;
+        var n = start.nextSibling;
+        while (n && n !== end) {
+          var next = n.nextSibling;
+          n.parentNode.removeChild(n);
+          n = next;
+        }
+        var tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        end.parentNode.insertBefore(tpl.content, end);
+        sweepDetached();
+        return 1;
+      }
     }
   };
 
@@ -194,6 +237,17 @@
     new Uint8Array(memory.buffer, scratch + pos, propsBytes.length).set(propsBytes);
     pos += propsBytes.length;
     wasm.exports.cerco_hydrate_root(i);
+  }
+
+  /* forget handlers + registry entries whose nodes left the document */
+  function sweepDetached() {
+    handlers.forEach(function (h, id) {
+      var el = registry[id];
+      if (el && id > 1 && !el.isConnected) handlers.delete(id);
+    });
+    for (var i = 2; i < registry.length; i++) {
+      if (registry[i] && !registry[i].isConnected) delete registry[i];
+    }
   }
 
   /* ------------------------------------------------- navigation interception */

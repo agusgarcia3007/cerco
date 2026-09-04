@@ -62,6 +62,8 @@ typedef struct {
 void wbuf_init(cerco_wbuf *b, cerco_arena *a);
 void wbuf_putn(cerco_wbuf *b, const void *data, size_t len);
 void wbuf_puts(cerco_wbuf *b, const char *s);
+/* bounded search over the (not NUL-terminated) buffer; NULL when absent */
+char *wbuf_find(const cerco_wbuf *b, size_t from, const char *needle);
 void wbuf_putc(cerco_wbuf *b, char c);
 void wbuf_reset(cerco_wbuf *b);
 
@@ -129,6 +131,7 @@ struct cerco_req {
   cerco_resp_hdr *resp_hdrs_tail;
   int resp_hdrs_count;
   cerco_wbuf resp;      /* body buffer */
+  const char *page_title; /* set by cerco_title(); patched in at finalize */
   int head_injected;    /* dev live-reload script */
   int responded;        /* response fully staged */
 
@@ -326,6 +329,7 @@ void conn_on_sse_written(uv_write_t *w, int status);
 /* --- dispatch glue ---------------------------------------------------------------- */
 void conn_request_dispatch(cerco_conn *c);
 void dev_inject_live_script(cerco_req *r);
+void apply_page_title(cerco_req *r);
 void wbuf_printf(cerco_wbuf *b, const char *fmt, ...);
 
 /* --- util ----------------------------------------------------------------------- */

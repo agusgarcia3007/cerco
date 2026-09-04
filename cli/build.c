@@ -731,7 +731,8 @@ static int install_cached_obj(const char *cached, const char *obj_full) {
 }
 
 /* cache dir for sdk objects: shared across every project built by this
- * cerco binary; keyed by the sdk bundle content hash + target + mode */
+ * machine; keyed by the sdk compile-inputs hash (see sdk.c) + target + mode,
+ * so template/host.js edits never invalidate compiled runtime objects */
 static int sdk_cache_path(build_ctx *b, int wasm, const char *obj_rel,
                           char *out, size_t cap) {
   if (!b->sdk_hash[0]) return -1;

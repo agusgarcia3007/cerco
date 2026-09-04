@@ -23,7 +23,7 @@ extern int32_t host_value(int32_t node, int32_t out_ptr, int32_t cap);
 __attribute__((import_module("cerco"), import_name("fetch")))
 extern void host_fetch(int32_t id, int32_t method_ptr, int32_t method_len,
                        int32_t url_ptr, int32_t url_len, int32_t body_ptr,
-                       int32_t body_len, int32_t resp_ptr, int32_t resp_cap);
+                       int32_t body_len);
 __attribute__((import_module("cerco"), import_name("nav_push")))
 extern void host_nav_push(int32_t url_ptr, int32_t url_len);
 __attribute__((import_module("cerco"), import_name("set_title")))
@@ -38,6 +38,8 @@ __attribute__((import_module("cerco"), import_name("hydrate_roots")))
 extern int32_t host_hydrate_roots(void);
 __attribute__((import_module("cerco"), import_name("nav_reload")))
 extern void host_nav_reload(void);
+__attribute__((import_module("cerco"), import_name("swap_page")))
+extern int32_t host_swap_page(int32_t ptr, int32_t len);
 
 /* runtime internals (implemented across env.c / dom.c / hydrate.c) */
 void *cerco_alloc_sticky(size_t n);

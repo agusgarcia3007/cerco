@@ -280,8 +280,14 @@ void cerco_events_reset(void) { g_slot_count = 0; }
 /* ------------------------------------------------------------------- http */
 
 #define MAX_PENDING_FETCHES 32
-#define FETCH_SLOTS 4           /* concurrent response buffers */
-#define FETCH_SLOT_SIZE 32768   /* max response body per fetch */
+#define FETCH_SLOTS 4 /* concurrent response buffers */
+/* Hard cap for one response body. Buffers are allocated to the size the
+ * response actually needs (the host reports it before writing), so small
+ * requests cost nothing and a large one is not silently cut in half.
+ * Override with -DCERCO_FETCH_MAX at build time. */
+#ifndef CERCO_FETCH_MAX
+#define CERCO_FETCH_MAX (512 * 1024)
+#endif
 
 typedef struct {
   int used;
@@ -292,6 +298,7 @@ typedef struct {
 
 static pending_fetch g_fetches[MAX_PENDING_FETCHES];
 static uint8_t *g_fetch_bufs[FETCH_SLOTS];
+static int32_t g_fetch_caps[FETCH_SLOTS];
 
 static pending_fetch *fetch_reserve(void) {
   for (int i = 0; i < MAX_PENDING_FETCHES; i++) {
@@ -303,19 +310,13 @@ static pending_fetch *fetch_reserve(void) {
   return 0; /* bounded: excess requests are rejected, never queued */
 }
 
-static uint8_t *fetch_slot_for(int id) {
-  int slot = id % FETCH_SLOTS;
-  if (!g_fetch_bufs[slot]) g_fetch_bufs[slot] = cerco_alloc_sticky(FETCH_SLOT_SIZE);
-  return g_fetch_bufs[slot];
-}
-
 void cerco_http_post(const char *url, const uint8_t *body, int32_t len,
                      cerco_http_cb cb, void *user) {
   pending_fetch *f = fetch_reserve();
   if (!f) return;
   f->cb = cb;
   f->user = user;
-  f->resp = fetch_slot_for((int)(f - g_fetches));
+  f->resp = 0; /* the host asks for a buffer once it knows the body size */
   char *u = cerco_scratch_strdup(url);
   uint8_t *bbuf = 0;
   if (body && len > 0) {
@@ -323,8 +324,7 @@ void cerco_http_post(const char *url, const uint8_t *body, int32_t len,
     if (bbuf) memcpy(bbuf, body, (size_t)len);
   }
   host_fetch((int32_t)(f - g_fetches), (int32_t)"POST", 4, (int32_t)u,
-             (int32_t)strlen(url), (int32_t)bbuf, bbuf ? len : 0,
-             (int32_t)f->resp, FETCH_SLOT_SIZE);
+             (int32_t)strlen(url), (int32_t)bbuf, bbuf ? len : 0);
 }
 
 void cerco_http_get(const char *url, cerco_http_cb cb, void *user) {
@@ -332,10 +332,34 @@ void cerco_http_get(const char *url, cerco_http_cb cb, void *user) {
   if (!f) return;
   f->cb = cb;
   f->user = user;
-  f->resp = fetch_slot_for((int)(f - g_fetches));
+  f->resp = 0; /* the host asks for a buffer once it knows the body size */
   char *u = cerco_scratch_strdup(url);
   host_fetch((int32_t)(f - g_fetches), (int32_t)"GET", 3, (int32_t)u,
-             (int32_t)strlen(url), 0, 0, (int32_t)f->resp, FETCH_SLOT_SIZE);
+             (int32_t)strlen(url), 0, 0);
+}
+
+/* The host calls this once it knows the body size and before writing it:
+ * hand back a buffer of exactly that size (plus a NUL, so callbacks can
+ * treat a text body as a C string). Returns 0 when the body is over
+ * CERCO_FETCH_MAX or the heap is exhausted, and the host then reports the
+ * request as CERCO_HTTP_TOO_LARGE rather than delivering a truncated body. */
+__attribute__((export_name("cerco_fetch_reserve")))
+int32_t cerco_fetch_reserve(int32_t id, int32_t len) {
+  if (id < 0 || id >= MAX_PENDING_FETCHES || !g_fetches[id].used) return 0;
+  if (len < 0 || len > CERCO_FETCH_MAX) return 0;
+  int slot = id % FETCH_SLOTS;
+  int32_t need = len + 1;
+  if (g_fetch_caps[slot] < need) {
+    /* the client heap is a bump allocator: the previous buffer is abandoned
+     * and reclaimed wholesale when navigation rewinds the heap */
+    uint8_t *buf = cerco_alloc_sticky((size_t)need);
+    if (!buf) return 0;
+    g_fetch_bufs[slot] = buf;
+    g_fetch_caps[slot] = need;
+  }
+  g_fetches[id].resp = g_fetch_bufs[slot];
+  g_fetch_bufs[slot][len] = 0;
+  return (int32_t)g_fetch_bufs[slot];
 }
 
 /* host calls into here when a fetch finishes; body is in f->resp */
@@ -346,8 +370,9 @@ void cerco_fetch_done(int32_t id, int32_t status, int32_t len) {
   void *user = g_fetches[id].user;
   const uint8_t *data = g_fetches[id].resp;
   g_fetches[id].used = 0;
+  g_fetches[id].resp = 0;
   cerco_scratch_reset();
-  if (cb) cb(status, len > 0 ? data : 0, len, user);
+  if (cb) cb(status, (len > 0 && data) ? data : 0, len, user);
   cerco_dom_flush();
 }
 

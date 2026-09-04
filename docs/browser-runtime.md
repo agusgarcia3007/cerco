@@ -10,7 +10,7 @@ The host (`runtime/browser/host.js`) is the only JavaScript in the framework:
 | dom_flush(ptr, len) | process one DOM command batch |
 | query(scope, sel, len) | querySelector; returns a node id |
 | value(node, out, cap) | read input value into wasm |
-| fetch(id, method, url, body, resp, cap) | async fetch; body lands in resp |
+| fetch(id, method, url, body) | async fetch; the client hands back a buffer |
 | nav_push(url) | history.pushState |
 | set_title(ptr, len) | document.title |
 | log(ptr, len) | console.log |
@@ -18,12 +18,13 @@ The host (`runtime/browser/host.js`) is the only JavaScript in the framework:
 | root_id(i) | node id of hydration root i |
 | hydrate_roots() | scan [data-cerco], assign ids, call mounts |
 | nav_reload() | location.reload fallback |
+| swap_page(ptr, len) | replace the nodes between the `cerco:page` markers |
 
 ## exports (host -> wasm)
 
 cerco_boot, cerco_hydrate_root(i), cerco_hydrate_all, cerco_event(node, slot),
-cerco_fetch_done(id, status, len), cerco_navigate(path_len), cerco_scratch(),
-cerco_scratch_size().
+cerco_fetch_reserve(id, len), cerco_fetch_done(id, status, len),
+cerco_navigate(path_len), cerco_scratch(), cerco_scratch_size().
 
 ## DOM command buffer
 
@@ -40,6 +41,24 @@ Flat byte buffer, variable-length commands, little-endian:
 
 Strings are inline `[u32 len][bytes]`. Batches flush once per state change —
 one wasm->JS crossing per interaction, not per DOM op.
+
+SET_INNER_HTML drops only the event handlers registered inside the subtree it
+replaces; handlers elsewhere on the page keep working.
+
+## fetch
+
+The host does not own the response buffer. When a response arrives it calls
+`cerco_fetch_reserve(id, len)`, the client allocates a buffer of exactly that
+size (plus a NUL, so text bodies are valid C strings) and returns its address,
+and only then does the host copy the bytes in and call `cerco_fetch_done`.
+
+Two consequences worth knowing:
+
+- A body is delivered whole or not at all. Over `CERCO_FETCH_MAX` (512 KiB by
+  default, `-DCERCO_FETCH_MAX=` to change) the reserve returns 0 and the
+  callback sees `CERCO_HTTP_TOO_LARGE` (-1) instead of a truncated body.
+- The host must re-read `memory.buffer` *after* the reserve call: allocating
+  can grow the wasm heap, which detaches every ArrayBuffer taken before it.
 
 ## events
 
@@ -59,6 +78,12 @@ one wasm->JS crossing per interaction, not per DOM op.
 ## navigation
 
 Link clicks on same-origin `/` paths and popstate call `cerco_navigate`:
-fetch page -> extract `<!--cerco:page-->...<!--cerco:/page-->` -> one
-SET_INNER_HTML on body -> update title -> re-hydrate. The heap rewinds
-between pages so navigation cannot grow memory.
+fetch page -> extract `<!--cerco:page-->...<!--cerco:/page-->` -> `swap_page`
+-> update title -> re-hydrate. The heap rewinds between pages so navigation
+cannot grow memory.
+
+`swap_page` replaces only the nodes *between* the markers. Everything the
+layout renders outside them — header, nav, footer — is never touched, so it
+does not flicker, lose scroll position or drop its event handlers on
+navigation. If the markers are missing the client falls back to a full
+document load.

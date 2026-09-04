@@ -160,6 +160,28 @@ static void touch_reload(cerco_project *proj) {
   }
 }
 
+/* poll until the child server accepts connections (or dies): reports "ready"
+ * as soon as the server is actually listening instead of after a fixed nap.
+ * 0 = up, -1 = dead or timed out */
+static int wait_server_up(int port, int timeout_ms) {
+  for (int waited = 0; waited < timeout_ms; waited += 20) {
+    if (child_dead()) return -1;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd >= 0) {
+      struct sockaddr_in addr;
+      memset(&addr, 0, sizeof(addr));
+      addr.sin_family = AF_INET;
+      addr.sin_addr.s_addr = htonl(0x7f000001UL);
+      addr.sin_port = htons((uint16_t)port);
+      int up = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
+      close(fd);
+      if (up) return 0;
+    }
+    usleep(20 * 1000);
+  }
+  return -1;
+}
+
 int cmd_dev(cerco_project *proj, int argc, char **argv) {
   setvbuf(stdout, NULL, _IOLBF, 0); /* watch/rebuild logs visible when piped */
   int port = 3000;
@@ -220,8 +242,7 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
 
   if (rc == 0) {
     spawn_server(proj, port);
-    usleep(300 * 1000);
-    if (child_dead()) {
+    if (wait_server_up(port, 5000) != 0) {
       fprintf(stderr, "cerco dev: server exited during startup (see error above)\n");
       if (tw_child) kill(tw_child, SIGTERM);
       return 1;
@@ -258,8 +279,7 @@ int cmd_dev(cerco_project *proj, int argc, char **argv) {
       printf("server rebuilt — restarting\n");
       stop_server();
       spawn_server(proj, port);
-      usleep(200 * 1000);
-      if (child_dead()) {
+      if (wait_server_up(port, 5000) != 0) {
         fprintf(stderr, "cerco dev: server exited during restart (see error above)\n");
         if (tw_child) kill(tw_child, SIGTERM);
         return 1;

@@ -11,7 +11,7 @@ typedef struct {
   unsigned int len;
 } bundle_file;
 
-extern const bundle_file cerco_bundle[73];
-#define CERCO_BUNDLE_COUNT 73
+extern const bundle_file cerco_bundle[75];
+#define CERCO_BUNDLE_COUNT 75
 
 #endif

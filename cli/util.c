@@ -148,6 +148,13 @@ int mkdir_for_file(const char *path) {
   return mkdirs(tmp);
 }
 
+/* directories walk_dir never descends into: VCS metadata, build output and
+ * dependency trees are never inputs to any scan */
+static int walk_pruned(const char *name) {
+  return !strcmp(name, ".git") || !strcmp(name, ".cerco") ||
+         !strcmp(name, "node_modules");
+}
+
 int walk_dir(const char *root, const char *rel,
              void (*cb)(const char *rel, const char *full, int is_dir, void *user),
              void *user) {
@@ -166,6 +173,7 @@ int walk_dir(const char *root, const char *rel,
     struct stat st;
     if (stat(childfull, &st) != 0) continue;
     if (S_ISDIR(st.st_mode)) {
+      if (walk_pruned(e->d_name)) continue;
       cb(relbuf, childfull, 1, user);
       walk_dir(root, relbuf, cb, user);
     } else if (S_ISREG(st.st_mode)) {

@@ -162,6 +162,48 @@ void cerco_textf(cerco_req *r, const char *fmt, ...) {
 
 void cerco_raw(cerco_req *r, const char *s) { wbuf_puts(&r->resp, s); }
 
+/* Per-page <title>.
+ *
+ * A layout streams its <head> before the route body runs, so a route cannot
+ * write into it directly. Instead it records the title here and the response
+ * finalizer rewrites the layout's <title> element once the document is
+ * complete — the same after-the-fact edit the dev live-reload script uses. */
+void cerco_title(cerco_req *r, const char *title) {
+  if (!r || !title) return;
+  size_t need = cerco_html_escape(title, strlen(title), NULL, 0);
+  char *buf = (char *)cerco_arena_alloc(r->arena, need + 1);
+  if (!buf) return;
+  cerco_html_escape(title, strlen(title), buf, need + 1);
+  r->page_title = buf;
+}
+
+/* replace the contents of the document's first <title> element */
+void apply_page_title(cerco_req *r) {
+  /* no status filter: a 404 page is still a page. Bodies without a <title>
+   * (redirects, JSON, plain text) fall out on the search below. */
+  if (!r->page_title || !r->resp.data) return;
+  char *open = wbuf_find(&r->resp, 0, "<title>");
+  if (!open) return;
+  char *inner = open + 7;
+  char *close = wbuf_find(&r->resp, (size_t)(inner - r->resp.data), "</title>");
+  if (!close) return;
+
+  size_t head = (size_t)(inner - r->resp.data);
+  size_t tail_at = (size_t)(close - r->resp.data);
+  size_t tail_len = r->resp.len - tail_at;
+  size_t title_len = strlen(r->page_title);
+  size_t new_len = head + title_len + tail_len;
+
+  char *nb = (char *)cerco_arena_alloc(r->arena, new_len);
+  if (!nb) return;
+  memcpy(nb, r->resp.data, head);
+  memcpy(nb + head, r->page_title, title_len);
+  memcpy(nb + head + title_len, r->resp.data + tail_at, tail_len);
+  r->resp.data = nb;
+  r->resp.len = new_len;
+  r->resp.cap = new_len;
+}
+
 void cerco_write_bytes(cerco_req *r, const void *data, size_t len) {
   wbuf_putn(&r->resp, data, len);
 }

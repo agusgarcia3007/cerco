@@ -19,15 +19,16 @@ cerco build        # single-file release binary: dist/my-app
 ## what a route looks like
 
 ```c
-/* src/routes/blog/[slug].c — one file, one route */
+/* src/routes/pokemon/[name].c — one file, every name */
 #include <cerco.h>
-#include "../server/posts.h"
 
 CERCO_ROUTE {
-  const post *p = post_find(cerco_param(r, "slug"));
-  if (!p) { cerco_status(r, 404); /* ... render not-found ... */ return; }
-  cerco_tag(r, "h1", CERCO_CLASS("font-display text-4xl tracking-tight")) {
-    cerco_text(r, p->title);
+  const char *name = cerco_param(r, "name");
+  if (!valid_slug(name)) { cerco_status(r, 404); /* ...not-found... */ return; }
+
+  cerco_title(r, name); /* this page's <title>, written into the layout */
+  cerco_tag(r, "h1", CERCO_CLASS("text-4xl font-semibold capitalize")) {
+    cerco_text(r, name); /* escaped, always */
   }
 }
 ```
@@ -42,6 +43,20 @@ CERCO_CLIENT_COMPONENT(counter) {
   cerco_bind_text(cerco_query(root, "[data-cerco-b=value]"), count);
   cerco_on(cerco_query(root, "[data-cerco-b=inc]"), "click", on_inc, count);
 }
+```
+
+Client components can also talk to the network directly. `cerco_http_get`
+delivers the body whole or not at all — never a silently truncated one — and
+NUL-terminates it, so a JSON response can be scanned as a C string:
+
+```c
+static void on_list(int status, const uint8_t *body, int32_t len, void *user) {
+  if (status != 200) return;                    /* 0 = network, -1 = too large */
+  const char *results = strstr((const char *)body, "\"results\"");
+  /* ... build nodes with cerco_create / cerco_set_attr / cerco_set_text ... */
+}
+
+cerco_http_get("https://pokeapi.co/api/v2/pokemon?limit=151", on_list, 0);
 ```
 
 ## install

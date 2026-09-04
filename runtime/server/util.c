@@ -84,6 +84,19 @@ void wbuf_putc(cerco_wbuf *b, char c) { wbuf_putn(b, &c, 1); }
 
 void wbuf_reset(cerco_wbuf *b) { b->data = NULL; b->len = 0; b->cap = 0; }
 
+/* Bounded substring search over the response body.
+ * The buffer holds arbitrary bytes and is deliberately not NUL-terminated,
+ * so strstr() on b->data would read past the end; use this instead. */
+char *wbuf_find(const cerco_wbuf *b, size_t from, const char *needle) {
+  if (!b->data || !needle) return NULL;
+  size_t n = strlen(needle);
+  if (n == 0 || b->len < n || from > b->len - n) return NULL;
+  for (size_t i = from; i + n <= b->len; i++) {
+    if (memcmp(b->data + i, needle, n) == 0) return b->data + i;
+  }
+  return NULL;
+}
+
 void wbuf_printf(cerco_wbuf *b, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);

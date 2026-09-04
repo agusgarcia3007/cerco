@@ -1,5 +1,8 @@
 #include <cerco.h>
 
+/* the shell every page shares: header + nav above, footer below.
+ * The header lives OUTSIDE the <!--cerco:page--> markers, so client-side
+ * navigation swaps only the page region and the header never flickers. */
 CERCO_LAYOUT {
   cerco_raw(r, "<!DOCTYPE html>\n");
   cerco_tag(r, "html", CERCO_ATTRS({"lang", "en"})) {
@@ -17,35 +20,55 @@ CERCO_LAYOUT {
           {"rel", "stylesheet"}, {"href", "/assets/styles.css"}));
       cerco_raw(r, "<script src=\"/assets/host.js\" defer></script>\n");
     }
-    cerco_tag(r, "body", NULL) {
-      cerco_tag(r, "div", CERCO_CLASS("mx-auto max-w-2xl px-6 min-h-screen flex flex-col")) {
-        cerco_tag(r, "header",
-                  CERCO_CLASS("flex items-baseline justify-between py-5 border-b border-rule")) {
+    cerco_tag(r, "body", CERCO_CLASS("min-h-screen flex flex-col antialiased")) {
+      cerco_tag(r, "header", CERCO_CLASS(
+          "sticky top-0 z-10 border-b border-edge bg-void/80 backdrop-blur")) {
+        cerco_tag(r, "div", CERCO_CLASS(
+            "mx-auto max-w-5xl px-6 h-14 flex items-center justify-between")) {
           cerco_tag(r, "a", CERCO_ATTRS(
               {"href", "/"},
-              {"class", "font-display italic text-lg hover:text-rust"})) {
+              {"class", "flex items-center gap-2.5 font-semibold tracking-tight"})) {
+            cerco_raw(r, "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" "
+                         "fill=\"none\" aria-hidden=\"true\">"
+                         "<rect width=\"24\" height=\"24\" rx=\"6\" fill=\"#ff5c1f\"/>"
+                         "<text x=\"12\" y=\"16.5\" text-anchor=\"middle\" "
+                         "font-family=\"ui-monospace, monospace\" font-size=\"13\" "
+                         "font-weight=\"bold\" fill=\"#0a0a0a\">c</text></svg>");
             cerco_raw(r, "my-app");
           }
-          cerco_tag(r, "nav", CERCO_CLASS("flex gap-5 font-mono text-[11px] uppercase tracking-[0.18em]")) {
-            cerco_tag(r, "a", CERCO_ATTRS({"href", "/blog"}, {"class", "hover:text-rust"})) {
-              cerco_raw(r, "blog");
+          cerco_tag(r, "nav", CERCO_CLASS(
+              "flex items-center gap-6 font-mono text-[11px] uppercase tracking-[0.18em] text-dim")) {
+            cerco_tag(r, "a", CERCO_ATTRS(
+                {"href", "/"}, {"class", "hover:text-ink transition-colors"})) {
+              cerco_raw(r, "pokedex");
             }
-            cerco_tag(r, "a", CERCO_ATTRS({"href", "/guestbook"}, {"class", "hover:text-rust"})) {
+            cerco_tag(r, "a", CERCO_ATTRS(
+                {"href", "/demo"}, {"class", "hover:text-ink transition-colors"})) {
+              cerco_raw(r, "demo");
+            }
+            cerco_tag(r, "a", CERCO_ATTRS(
+                {"href", "/guestbook"}, {"class", "hover:text-ink transition-colors"})) {
               cerco_raw(r, "guestbook");
             }
-            cerco_tag(r, "a", CERCO_ATTRS({"href", "/demo"}, {"class", "hover:text-rust"})) {
-              cerco_raw(r, "demo");
+            cerco_tag(r, "a", CERCO_ATTRS(
+                {"href", "https://github.com/agusgarcia3007/cerco"},
+                {"class", "hover:text-ink transition-colors"})) {
+              cerco_raw(r, "github");
             }
           }
         }
-        cerco_tag(r, "main", CERCO_CLASS("rise py-12 grow")) {
-          cerco_layout_children(r);
-        }
-        cerco_tag(r, "footer",
-                  CERCO_CLASS("flex items-baseline justify-between py-5 border-t border-rule")) {
-          cerco_tag(r, "span", CERCO_CLASS("label")) { cerco_raw(r, "my-app"); }
-          cerco_tag(r, "span", CERCO_CLASS("label")) {
-            cerco_raw(r, "built with <a href=\"https://github.com/agusgarcia3007/cerco\" class=\"underline hover:text-rust\">cerco</a>");
+      }
+      cerco_tag(r, "main", CERCO_CLASS("rise grow")) {
+        cerco_layout_children(r);
+      }
+      cerco_tag(r, "footer", CERCO_CLASS("border-t border-edge")) {
+        cerco_tag(r, "div", CERCO_CLASS(
+            "mx-auto max-w-5xl px-6 py-6 flex items-center justify-between "
+            "font-mono text-[11px] uppercase tracking-[0.18em] text-faint")) {
+          cerco_tag(r, "span", NULL) { cerco_raw(r, "my-app"); }
+          cerco_tag(r, "span", NULL) {
+            cerco_raw(r, "built with <a href=\"https://github.com/agusgarcia3007/cerco\" "
+                         "class=\"underline hover:text-spark\">cerco</a>");
           }
         }
       }

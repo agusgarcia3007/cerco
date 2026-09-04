@@ -119,6 +119,7 @@ void wpool_drain_completions(cerco_server *srv) {
       r->status = 500;
       wbuf_puts(&r->resp, "empty response\n");
     }
+    apply_page_title(r);
     dev_inject_live_script(r);
     conn_start_response(r);
   }

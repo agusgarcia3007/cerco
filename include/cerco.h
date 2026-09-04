@@ -53,6 +53,11 @@ void cerco_set_cookie(cerco_req *r, const char *name, const char *value,
                       int max_age, const char *path, unsigned flags);
 void cerco_redirect(cerco_req *r, const char *location); /* 302 (303 after POST) */
 
+/* Set this page's <title>, overriding the one the layout rendered. Call it
+ * anywhere in a route handler: the document is rewritten after the handler
+ * returns, so ordering does not matter. The text is escaped. */
+void cerco_title(cerco_req *r, const char *title);
+
 /* ------------------------------------------------------------ HTML writing */
 
 /* All text/attribute writes are HTML-escaped by default. */

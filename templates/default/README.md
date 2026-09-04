@@ -13,16 +13,23 @@ cerco dev        # http://localhost:3000 with live reload
 
 | Route | File | What it shows |
 |---|---|---|
-| `/` | `src/routes/index.c` | front page, an index of everything else |
-| `/blog` | `src/routes/blog/index.c` | list rendered from `src/server/posts.c` |
-| `/blog/one-language` etc. | `src/routes/blog/[slug].c` | path parameter, inline 404 for unknown slugs |
+| `/` | `src/routes/index.c` | the pokedex: 151 sprites fetched and filtered from wasm |
+| `/pokemon/pikachu` | `src/routes/pokemon/[name].c` | path parameter, validated server-side, passed to a client component |
 | `/guestbook` | `src/routes/guestbook/index.c` | form + entries |
 | `POST /guestbook` | `src/routes/guestbook/index.post.c` | `cerco_form`, validation, `cerco_redirect` (303) |
 | `/demo` | `src/routes/demo.c` | client component (signals) + server function call |
 | anything else | `src/routes/404.c` | custom not-found page |
 
-`src/routes/layout.c` is the shared shell (masthead, nav, footer). Nested
-directories can carry their own `layout.c`.
+`src/routes/layout.c` is the shared shell (header, nav, footer). It renders
+*outside* the page region, so client-side navigation swaps only the page and
+the header never flickers. Nested directories can carry their own `layout.c`.
+
+Each route calls `cerco_title(r, ...)` to set its own `<title>`.
+
+The two client components worth reading are `src/components/pokedex.c` (fetch,
+build DOM nodes, filter on input) and `src/components/pokemon.c` (fetch one
+record, fill in the server-rendered shell). Neither has a line of JavaScript
+behind it: they are C compiled to WebAssembly.
 
 ## build
 

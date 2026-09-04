@@ -297,7 +297,7 @@ void dev_inject_live_script(cerco_req *r) {
 
   static const char script[] = "<script src=\"/assets/host.js\" defer></script>"
                                "<script src=\"/__cerco/live.js\" defer></script>";
-  const char *head = r->resp.data ? strstr(r->resp.data, "<head>") : NULL;
+  const char *head = wbuf_find(&r->resp, 0, "<head>");
   size_t insert_at = head ? (size_t)(head - r->resp.data + 6) : 0;
   size_t script_len = sizeof(script) - 1;
   size_t new_len = r->resp.len + script_len;

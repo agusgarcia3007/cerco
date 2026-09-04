@@ -6,10 +6,10 @@
  * function (registered by generated code) and runs it against the existing
  * SSR DOM. No re-rendering of server HTML.
  *
- * Navigation: fetch the new page (server-rendered full HTML), swap the
- * region between cerco:page markers into <body> via one innerHTML command
- * (trusted server output), re-hydrate. Heap rewinds between pages so RAM
- * stays bounded.
+ * Navigation: fetch the new page (server-rendered full HTML), swap only the
+ * region between the cerco:page markers via the host's swap_page import —
+ * the layout (header/nav/footer) sits outside the markers and survives.
+ * Heap rewinds between pages so RAM stays bounded.
  */
 #include "cerco_client.h"
 #include "client_internal.h"
@@ -100,11 +100,11 @@ static void nav_page_done(int status, const uint8_t *data, int32_t len, void *us
   const char *html = (const char *)data;
   size_t off, plen;
   extract_between(html, "<!--cerco:page-->", "<!--cerco:/page-->", &off, &plen);
-  if (!plen || plen > 32768u - 16u) {
-    host_nav_reload();
+  if (!plen || plen > 60000u /* scratch is 64 KiB; title needs ~1 KiB */) {
+    host_nav_reload(); /* fall back to full document load */
     return;
   }
-  /* stage the region + NUL in scratch (the command buffer copies it) */
+  /* stage the region + NUL in scratch (the host reads it from wasm memory) */
   char *region = cerco_scratch_alloc(plen + 1);
   if (!region) {
     host_nav_reload();
@@ -112,7 +112,11 @@ static void nav_page_done(int status, const uint8_t *data, int32_t len, void *us
   }
   memcpy(region, html + off, plen);
   region[plen] = 0;
-  cerco_set_inner_html(1 /* document.body */, region);
+  /* swap only the page region; markers missing -> full document load */
+  if (!host_swap_page((int32_t)region, (int32_t)plen)) {
+    host_nav_reload();
+    return;
+  }
 
   size_t toff = 0, tlen = 0;
   const char *t = strstr(html, "<title>");
@@ -132,7 +136,6 @@ static void nav_page_done(int status, const uint8_t *data, int32_t len, void *us
       host_set_title((int32_t)title, (int32_t)tlen);
     }
   }
-  cerco_dom_flush();
   cerco_hydrate_all();
 }
 
